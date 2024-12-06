@@ -3,8 +3,11 @@
 #include <iostream>
 #include <fstream>
 #include <signal.h>
+#include <assert.h>
+#include <chrono>
 
-int receive(struct iio_context *ctx);
+void config_phy(const struct iio_context *ctx);
+int receive(const struct iio_context *ctx, long to_run);
 
 bool run = true;
 
@@ -18,53 +21,102 @@ static void handle_sig(int sig)
  
 int main (int argc, char **argv)
 {
-	struct iio_context *ctx;
-	struct iio_device *phy;
+//	struct iio_context *ctx;
+//	struct iio_device *phy;
+//	struct iio_channel *voltage0, *altvoltage0;
+	long seconds_to_run = 0;
+	if(argc == 2){
+		//just one argument
+		seconds_to_run = atoi(argv[1]);
+	}
+
+	int err = 0;
 
 	signal(SIGINT, handle_sig);
  
-	ctx = iio_create_context_from_uri("ip:192.168.2.1");
- 
-	phy = iio_context_find_device(ctx, "ad9361-phy"); //iio:device в iio_info
+	const auto ctx = iio_create_context_from_uri("ip:192.168.2.1");
+	assert(ctx != nullptr);
+
+	config_phy(ctx);
+	receive(ctx, seconds_to_run);
+
+	iio_context_destroy(ctx);
+
+	return 0;
+}
+
+//Configure physical device3
+void config_phy(const struct iio_context *ctx){
+	const auto phy = iio_context_find_device(ctx, "ad9361-phy"); //iio:device в iio_info
+	assert(phy != nullptr);
+	const auto altvoltage0 = iio_device_find_channel(phy, "altvoltage0", true);// RX_LO (output)
+	assert(altvoltage0 != nullptr);
+	const auto voltage0 = iio_device_find_channel(phy, "voltage0", false); // (input)
+	assert(voltage0 != nullptr);
+	int err = 0;
 	// Названия атрибутов берём также из вывода iio_info
-	iio_channel_attr_write_longlong(
-		iio_device_find_channel(phy, "altvoltage0", true), // RX_LO (output)
+	err = iio_channel_attr_write_longlong(
+		altvoltage0,
 		"frequency",
 		1575420000);
+	assert(err == 0);
  
-	iio_channel_attr_write_longlong(
-		iio_device_find_channel(phy, "voltage0", false), // (input)
+	err = iio_channel_attr_write_longlong(
+		voltage0,
 		"rf_bandwidth",
 		2600000);
+	assert(err == 0);
 
-	iio_channel_attr_write_longlong(
-		iio_device_find_channel(phy, "voltage0", false), // (input)
+	err = iio_channel_attr_write_longlong(
+		voltage0,
 		"sampling_frequency",
 		3000000);
+	assert(err == 0);
  
-	iio_channel_attr_write(
-		iio_device_find_channel(phy, "voltage0", false), // (input)
+	err = iio_channel_attr_write(
+		voltage0,
 		"rf_port_select",
 		"A_BALANCED");
+	assert(err == 11);//bytes written
 
-	iio_channel_attr_write(
-		iio_device_find_channel(phy, "voltage0", false), // (input)
+	err = iio_channel_attr_write(
+		voltage0,
 		"gain_control_mode",
 		"manual");
+	assert(err == 7);//bytes written
 
-	iio_channel_attr_write_double(
-		iio_device_find_channel(phy, "voltage0", false), // (input)
+	err = iio_channel_attr_write_longlong(
+		voltage0,
 		"hardwaregain",
-		71.0);
+		71);
+	assert(err == 0);
 
-	receive(ctx);
- 
-	iio_context_destroy(ctx);
- 
-	return 0;
-} 
+	err = iio_device_attr_write(
+		phy,
+		"ensm_mode",
+		"tdd");
+	assert(err == 4);
 
-int receive(struct iio_context *ctx)
+	err = iio_device_debug_attr_write_bool(
+		phy,
+		"adi,xo-disable-use-ext-refclk-enable",
+		false);
+	assert(err == 0);
+
+	err = iio_device_debug_attr_write_bool(
+		phy,
+		"adi,external-rx-lo-enable",
+		true);
+	assert(err == 0);
+
+	err = iio_device_debug_attr_write_bool(
+		phy,
+		"adi,external-tx-lo-enable",
+		true);
+	assert(err == 0);
+}
+
+int receive(const struct iio_context *ctx, long to_run)
 {
 	std::ofstream out_data("samples.dat", std::ios::out | std::ios::binary);
 	if(!out_data){
@@ -72,29 +124,30 @@ int receive(struct iio_context *ctx)
 		return 1;
 	}
 
-	struct iio_device *dev;
-	struct iio_channel *rx0_i, *rx0_q;
-	struct iio_buffer *rxbuf;
+//	struct iio_device *dev;
+//	struct iio_channel *rx0_i, *rx0_q;
+//	struct iio_buffer *rxbuf;
  
-	dev = iio_context_find_device(ctx, "cf-ad9361-lpc");
- 
-	rx0_i = iio_device_find_channel(dev, "voltage0", 0);
-	rx0_q = iio_device_find_channel(dev, "voltage1", 0);
+	const auto dev = iio_context_find_device(ctx, "cf-ad9361-lpc");
+	assert(dev != nullptr);
+	const auto rx0_i = iio_device_find_channel(dev, "voltage0", 0);
+	assert(dev != nullptr);
+	const auto rx0_q = iio_device_find_channel(dev, "voltage1", 0);
+	assert(dev != nullptr);
  
 	iio_channel_enable(rx0_i);
 	iio_channel_enable(rx0_q);
  
-	rxbuf = iio_device_create_buffer(dev, 1024*1024, false);
-	if (!rxbuf) {
-		std::cerr << "Could not create RX buffer";
-		std::exit(-1);
-	}
- 
-	while (run) {
+	const auto rxbuf = iio_device_create_buffer(dev, 1024*1024, false);
+	assert(rxbuf != nullptr);
+
+	const auto stop_time = std::chrono::system_clock::now() + std::chrono::seconds(to_run);
+	while (run && std::chrono::system_clock::now() < stop_time) {
 		char *p_dat, *p_end, *t_dat;
 		ptrdiff_t p_inc;
  
-		iio_buffer_refill(rxbuf);
+		auto refilled = iio_buffer_refill(rxbuf);
+		assert(refilled >= 0);
  
 		p_inc = iio_buffer_step(rxbuf);
 		p_end = (char*)iio_buffer_end(rxbuf);
