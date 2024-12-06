@@ -88,31 +88,31 @@ void config_phy(const struct iio_context *ctx){
 	err = iio_channel_attr_write_longlong(
 		voltage0,
 		"hardwaregain",
-		71);
+		71); //External LNA +60 dB
 	assert(err == 0);
 
 	err = iio_device_attr_write(
 		phy,
 		"ensm_mode",
-		"tdd");
+		"fdd");
 	assert(err == 4);
 
 	err = iio_device_debug_attr_write_bool(
 		phy,
 		"adi,xo-disable-use-ext-refclk-enable",
-		false);
+		true);
 	assert(err == 0);
 
 	err = iio_device_debug_attr_write_bool(
 		phy,
 		"adi,external-rx-lo-enable",
-		true);
+		false);
 	assert(err == 0);
 
 	err = iio_device_debug_attr_write_bool(
 		phy,
 		"adi,external-tx-lo-enable",
-		true);
+		false);
 	assert(err == 0);
 }
 
